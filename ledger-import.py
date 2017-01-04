@@ -1,9 +1,10 @@
 #!/usr/bin/python3
+from collections import namedtuple
 from contextlib import closing
 import sqlite3
 import datetime
 
-def fmtCurrency(coins, name):
+def fmt_currency(coins, name):
     sign = coins >= 0
     if not sign: coins = -coins
     decim, coins = coins % 100, coins // 100
@@ -20,7 +21,7 @@ def fmtCurrency(coins, name):
     if not sign: money[:0] = ['-']
     return ''.join(money)
 
-def fmtEntry(entry, year = None):
+def fmt_entry(entry, year = None):
     when = entry['when']
     block = []
     date = when.strftime('%m/%d' if year == when.year else '%Y/%m/%d')
@@ -42,6 +43,8 @@ def fetchiter(cursor):
 
 class Accounts:
     __slots__ = ('_assets', '_categories')
+    Account = namedtuple('Account', ['label', 'currency'])
+
     def __init__(self, conn = None):
         self._assets = {}
         self._categories = {}
@@ -53,7 +56,7 @@ class Accounts:
     def _load_assets(self, c):
         c.execute('SELECT _id, label, currency FROM accounts')
         for (_id, label, cur) in fetchiter(c):
-            self._assets[_id] = (label, cur)
+            self._assets[_id] = self.Account(label, cur)
 
     def _load_categories(self, c):
         c.execute('SELECT _id, parent_id, label FROM categories')
@@ -68,22 +71,18 @@ class Accounts:
         return label
 
     def category(self, _id):
-        if _id is None: return 'Equity:Unknown'
+        if _id is None: return 'Category:Unknown'
         label = self._category(_id)
         return label
 
     def asset(self, _id):
-        if _id is None: return 'Assets:Unknown'
-        #try:
-        label = self._assets[_id][0]
-        #except KeyError:
-        #    label = 'Unresolved:' + str(_id)
+        label = self._assets[_id].label
         return 'Assets:' + label
+
     def asset_currency(self, _id):
-        try:
-            return self._assets[_id][1]
-        except KeyError:
-            return 'UAH'
+        return self._assets[_id].currency
+
+## Entry
 
 conn = sqlite3.connect('BACKUP')
 conn.row_factory = sqlite3.Row
@@ -95,20 +94,21 @@ with closing(conn.cursor()) as c:
 year = None
 
 with closing(conn.cursor()) as c:
-    c.execute('''SELECT _id, date, amount, cat_id, account_id, transfer_peer, transfer_account, payee_id, comment
+    c.execute('''SELECT *
                  FROM transactions
                  WHERE (transfer_peer IS NULL OR _id < transfer_peer)''')
     for row in fetchiter(c):
-        #print (';' + repr({k: row[k] for k in row.keys()}))
-        (_id, date, amount, cat_id, asset_id, transfer_peer, transfer_acc, payee_id, comment) = row
-        src = accounts.asset(asset_id)
-        cur = accounts.asset_currency(asset_id)
-        if transfer_acc is None:
+        d = {k: row[k] for k in row.keys()}
+        print ('; %r' % (d,))
+        locals().update(d)
+        src = accounts.asset(account_id)
+        cur = accounts.asset_currency(account_id)
+        if transfer_account is None:
             assert transfer_peer is None
-            dst = 'Expenses:' + accounts.category(cat_id)
+            dst = accounts.category(cat_id)
         else:
-            dst = accounts.asset(transfer_acc)
-        #print([src, fmtCurrency(amount, cur), dst])
+            dst = accounts.asset(transfer_account)
+        #print([src, fmt_currency(amount, cur), dst])
         if dst == '__SPLIT_TRANSACTION__': continue
         when = datetime.datetime.fromtimestamp(date)
         entry = {
@@ -116,14 +116,14 @@ with closing(conn.cursor()) as c:
             'comment': comment,
             'payee': None if payee_id is None else payees[payee_id],
             'flow': {
-                src: fmtCurrency(amount, cur),
-                dst: fmtCurrency(-amount, cur)
+                src: fmt_currency(amount, cur),
+                dst: fmt_currency(-amount, cur)
             }
         }
         if year != when.year:
             print(when.strftime('\nY%Y\n'))
             year = when.year
-        print(fmtEntry(entry, year))
+        print(fmt_entry(entry, year=year))
 
 # TODO: split transaction
 # TODO: mapping?

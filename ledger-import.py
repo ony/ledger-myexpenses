@@ -84,12 +84,21 @@ class Accounts:
     def asset_currency(self, _id):
         return self._assets[_id].currency
 
+    def labels(self):
+        for _id in self._assets.keys():
+            yield self.asset(_id)
+        for _id in self._categories.keys():
+            if _id == 0: continue
+            yield self.category(_id)
+
 ## Entry
 
 parser = argparse.ArgumentParser()
 verbosity_group = parser.add_mutually_exclusive_group()
 verbosity_group.add_argument('-v', '--verbose', action='count', default=0, help="produce more verbose information")
 verbosity_group.add_argument('-q', '--quiet', action='store_true', default=False, help="inhibit any warnings")
+action_group = parser.add_argument_group('alternative actions').add_mutually_exclusive_group()
+action_group.add_argument('--accounts', action='store_true', help='list all accounts')
 parser.add_argument('file', type=str, nargs='?', default="BACKUP", help="MyExpenses database")
 args = parser.parse_args()
 level = dict(enumerate([logging.WARNING, logging.INFO, logging.DEBUG])).get(args.verbose)
@@ -107,6 +116,10 @@ accounts = Accounts(conn)
 with closing(conn.cursor()) as c:
     c.execute('SELECT _id, name FROM payee')
     payees = {r['_id']: r['name'] for r in fetchiter(c)}
+
+if args.accounts:
+    print("\n".join(accounts.labels()))
+    parser.exit()
 
 year = None
 

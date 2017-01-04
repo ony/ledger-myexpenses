@@ -87,12 +87,16 @@ class Accounts:
 ## Entry
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-v', '--verbose', action='count', default=0, help="produce more verbose information")
+verbosity_group = parser.add_mutually_exclusive_group()
+verbosity_group.add_argument('-v', '--verbose', action='count', default=0, help="produce more verbose information")
+verbosity_group.add_argument('-q', '--quiet', action='store_true', default=False, help="inhibit any warnings")
 parser.add_argument('file', type=str, nargs='?', default="BACKUP", help="MyExpenses database")
 args = parser.parse_args()
 level = dict(enumerate([logging.WARNING, logging.INFO, logging.DEBUG])).get(args.verbose)
 if level is None:
     parser.error("Too much of verbosity {}".format(args.verbose))
+if args.quiet:
+    level = logging.ERROR
 
 logging.basicConfig(level=level)
 log = logging.getLogger()

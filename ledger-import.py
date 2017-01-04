@@ -32,7 +32,7 @@ def fmt_entry(entry, year = None):
     header += '  ; time: ' + when.strftime('%H:%M')
     block.append(header)
     del header
-    if entry['comment']: block.append('    ; note: ' + comment)
+    if entry['comment']: block.append('    ; note: ' + entry['comment'])
     for (acc, delta) in entry['flow'].items():
         block.append('    {:<26}  {:>16}'.format(acc, delta))
     return "\n".join(block) + "\n"
@@ -103,6 +103,71 @@ class Accounts:
             if _id == 0: continue
             yield self.category(_id)
 
+def action_ledger(conn, log=logging.getLogger()):
+    global accounts, payees
+    year = None
+    parent = None  # last split parent. always preceed postings
+
+    with closing(conn.cursor()) as c:
+        c.execute('''SELECT *
+                     FROM transactions
+                     WHERE (transfer_peer IS NULL OR _id < transfer_peer)
+                     ORDER BY date, parent_id IS NOT NULL''')
+        for row in fetchiter(c):
+            d = {k: row[k] for k in row.keys()}
+            if log.getEffectiveLevel() <= logging.DEBUG:
+                print ('; %r' % (d,))
+            account_id = row['account_id']
+            src = accounts.asset(account_id)
+            cur = accounts.asset_currency(account_id)
+
+            transfer_account = row['transfer_account']
+            if transfer_account is None:
+                assert row['transfer_peer'] is None
+                cat_id = row['cat_id']
+                if cat_id is None:
+                    logging.warning("No expenses category for txn: %r" % (d))
+                elif cat_id is 0:
+                    parent = row  # remember for upcoming postings
+                    continue  # skip parent split transaction
+                else:
+                    dst = accounts.category(cat_id)
+            else:
+                assert row['cat_id'] is 0 or row['cat_id'] is None
+                dst = accounts.asset(transfer_account)
+
+            date = row['date']
+            when = datetime.datetime.fromtimestamp(date)
+            comment = row['comment']
+            payee_id = row['payee_id']
+            amount = row['amount']
+
+            parent_id = row['parent_id']
+            if parent_id is not None:  # posting for split
+                assert payee_id is None
+                assert parent is not None
+                assert parent['_id'] == parent_id
+                assert parent['date'] == date  # XXX: for merge all dates should be equal in split
+                assert not comment or not parent['comment']  # XXX: either one comment per split or posings with individual ones
+                comment = comment or parent['comment']
+                payee_id = parent['payee_id']
+            else:
+                parent = None  # forget split parent with first non-split transaction
+
+            entry = {
+                'when': when,
+                'comment': comment,
+                'payee': None if payee_id is None else payees[payee_id],
+                'flow': {
+                    src: fmt_currency(amount, cur),
+                    dst: fmt_currency(-amount, cur)
+                }
+            }
+            if year != when.year:
+                print(when.strftime('\nY%Y\n'))
+                year = when.year
+            print(fmt_entry(entry, year=year))
+
 ## Entry
 
 parser = argparse.ArgumentParser()
@@ -146,58 +211,7 @@ elif args.payees:
     print("\n".join(payees.values()))
     parser.exit()
 
-year = None
-parent = None  # last split parent. always preceed postings
-
-with closing(conn.cursor()) as c:
-    c.execute('''SELECT *
-                 FROM transactions
-                 WHERE (transfer_peer IS NULL OR _id < transfer_peer)
-                 ORDER BY date, parent_id IS NOT NULL''')
-    for row in fetchiter(c):
-        d = {k: row[k] for k in row.keys()}
-        if log.getEffectiveLevel() <= logging.DEBUG:
-            print ('; %r' % (d,))
-        locals().update(d)
-        src = accounts.asset(account_id)
-        cur = accounts.asset_currency(account_id)
-        if transfer_account is None:
-            assert transfer_peer is None
-            if cat_id is None:
-                logging.warning("No expenses category for txn: %r" % (d))
-            elif cat_id is 0:
-                parent = row  # remember for upcoming postings
-                continue  # skip parent split transaction
-            else:
-                dst = accounts.category(cat_id)
-        else:
-            dst = accounts.asset(transfer_account)
-
-        if parent_id is not None:  # posting for split
-            assert payee_id is None
-            assert parent is not None
-            assert parent['_id'] == parent_id
-            assert parent['date'] == date  # XXX: for merge all dates should be equal in split
-            assert not comment or not parent['comment']  # XXX: either one comment per split or posings with individual ones
-            comment = comment or parent['comment']
-            payee_id = parent['payee_id']
-        else:
-            parent = None  # forget split parent with first non-split transaction
-
-        when = datetime.datetime.fromtimestamp(date)
-        entry = {
-            'when': when,
-            'comment': comment,
-            'payee': None if payee_id is None else payees[payee_id],
-            'flow': {
-                src: fmt_currency(amount, cur),
-                dst: fmt_currency(-amount, cur)
-            }
-        }
-        if year != when.year:
-            print(when.strftime('\nY%Y\n'))
-            year = when.year
-        print(fmt_entry(entry, year=year))
+action_ledger(conn, log=log)
 
 # TODO: merge postings of split transaction
 # TODO: mapping?

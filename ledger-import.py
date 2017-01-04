@@ -88,7 +88,9 @@ accounts = Accounts(conn)
 year = None
 
 with closing(conn.cursor()) as c:
-    c.execute('SELECT _id, date, amount, cat_id, account_id, transfer_peer, transfer_account, payee_id, comment FROM transactions')
+    c.execute('''SELECT _id, date, amount, cat_id, account_id, transfer_peer, transfer_account, payee_id, comment
+                 FROM transactions
+                 WHERE (transfer_peer IS NULL OR _id < transfer_peer)''')
     for row in fetchiter(c):
         #print (';' + repr(row))
         (_id, date, amount, cat_id, asset_id, transfer_peer, transfer_acc, payee_id, desc) = row

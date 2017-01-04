@@ -147,11 +147,13 @@ elif args.payees:
     parser.exit()
 
 year = None
+parent = None  # last split parent. always preceed postings
 
 with closing(conn.cursor()) as c:
     c.execute('''SELECT *
                  FROM transactions
-                 WHERE (transfer_peer IS NULL OR _id < transfer_peer)''')
+                 WHERE (transfer_peer IS NULL OR _id < transfer_peer)
+                 ORDER BY date, parent_id IS NOT NULL''')
     for row in fetchiter(c):
         d = {k: row[k] for k in row.keys()}
         if log.getEffectiveLevel() <= logging.DEBUG:
@@ -163,11 +165,25 @@ with closing(conn.cursor()) as c:
             assert transfer_peer is None
             if cat_id is None:
                 logging.warning("No expenses category for txn: %r" % (d))
-            dst = accounts.category(cat_id)
+            elif cat_id is 0:
+                parent = row  # remember for upcoming postings
+                continue  # skip parent split transaction
+            else:
+                dst = accounts.category(cat_id)
         else:
             dst = accounts.asset(transfer_account)
-        #print([src, fmt_currency(amount, cur), dst])
-        if dst == '__SPLIT_TRANSACTION__': continue
+
+        if parent_id is not None:  # posting for split
+            assert payee_id is None
+            assert parent is not None
+            assert parent['_id'] == parent_id
+            assert parent['date'] == date  # XXX: for merge all dates should be equal in split
+            assert not comment or not parent['comment']  # XXX: either one comment per split or posings with individual ones
+            comment = comment or parent['comment']
+            payee_id = parent['payee_id']
+        else:
+            parent = None  # forget split parent with first non-split transaction
+
         when = datetime.datetime.fromtimestamp(date)
         entry = {
             'when': when,
@@ -183,5 +199,5 @@ with closing(conn.cursor()) as c:
             year = when.year
         print(fmt_entry(entry, year=year))
 
-# TODO: split transaction
+# TODO: merge postings of split transaction
 # TODO: mapping?

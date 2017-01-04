@@ -36,7 +36,7 @@ def fetchiter(cursor):
         records = cursor.fetchmany()
         if len(records) == 0: raise StopIteration
         yield from records
-    
+
 class Accounts:
     __slots__ = ('_assets', '_categories')
     def __init__(self, conn = None):
@@ -46,7 +46,7 @@ class Accounts:
             with closing(conn.cursor()) as c:
                 self._load_assets(c)
                 self._load_categories(c)
-    
+
     def _load_assets(self, c):
         c.execute('SELECT _id, label, currency FROM accounts')
         for (_id, label, cur) in fetchiter(c):
@@ -63,12 +63,12 @@ class Accounts:
         if parent_id is not None:
             label = self._category(parent_id) + ':' + label
         return label
-    
+
     def category(self, _id):
         if _id is None: return 'Equity:Unknown'
         label = self._category(_id)
         return label
-    
+
     def asset(self, _id):
         if _id is None: return 'Assets:Unknown'
         #try:

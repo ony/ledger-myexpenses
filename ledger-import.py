@@ -45,7 +45,7 @@ def fetchiter(cursor):
 
 class Accounts:
     __slots__ = ('_assets', '_categories')
-    Account = namedtuple('Account', ['label', 'currency'])
+    Account = namedtuple('Account', ['label', 'currency', 'type'])
 
     def __init__(self, conn = None):
         self._assets = {}
@@ -56,9 +56,9 @@ class Accounts:
                 self._load_categories(c)
 
     def _load_assets(self, c):
-        c.execute('SELECT _id, label, currency FROM accounts')
-        for (_id, label, cur) in fetchiter(c):
-            self._assets[_id] = self.Account(label, cur)
+        c.execute('SELECT _id, {} FROM accounts'.format(", ".join(self.Account._fields)))
+        for r in fetchiter(c):
+            self._assets[r['_id']] = self.Account(*tuple(r)[1:])
 
     def _load_categories(self, c):
         c.execute('SELECT _id, parent_id, label FROM categories')
@@ -78,8 +78,20 @@ class Accounts:
         return label
 
     def asset(self, _id):
-        label = self._assets[_id].label
-        return 'Assets:' + label
+        asset = self._assets[_id]
+        labels = []
+        if asset.type == 'CASH':
+            labels.extend(['Assets', 'Cash'])
+        elif asset.type == 'BANK':
+            labels.extend(['Assets', 'Bank'])
+        elif asset.type == 'ASSET':
+            labels.append('Assets')
+        elif asset.type == 'CCARD':
+            labels.extend(['Liabilities', 'CreditCard'])
+        elif asset.type == 'LIABILITY':
+            labels.extend(['Liabilities'])
+        labels.append(asset.label)
+        return ':'.join(labels)
 
     def asset_currency(self, _id):
         return self._assets[_id].currency

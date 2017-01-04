@@ -6,22 +6,25 @@ import datetime
 import logging
 import argparse
 
-def fmt_currency(coins, name):
-    sign = coins >= 0
-    if not sign: coins = -coins
-    decim, coins = coins % 100, coins // 100
-    if decim != 0 or coins >= 1000: money = ['.%.02d' % (decim,)]
-    else: money = []
-    while True:
-        part, coins = coins % 1000, coins // 1000
-        if coins == 0:
-            money[:0] = ['%d' % (part,)]
-            break
-        else: money[:0] = [',%03d' % (part,)]
-    if name == 'USD': money[:0] = '$'
-    else: money += [' ', name]
-    if not sign: money[:0] = ['-']
-    return ''.join(money)
+class Flow(namedtuple('Flow', ['amount', 'currency'])):
+    def __format__(self, format_spec): return format(str(self), format_spec)
+    def __str__(self):
+        coins = self.amount
+        sign = coins >= 0
+        if not sign: coins = -coins
+        decim, coins = coins % 100, coins // 100
+        if decim != 0 or coins >= 1000: money = ['.%.02d' % (decim,)]
+        else: money = []
+        while True:
+            part, coins = coins % 1000, coins // 1000
+            if coins == 0:
+                money[:0] = ['%d' % (part,)]
+                break
+            else: money[:0] = [',%03d' % (part,)]
+        if self.currency == 'USD': money[:0] = '$'
+        else: money += [' ', self.currency]
+        if not sign: money[:0] = ['-']
+        return ''.join(money)
 
 def fmt_entry(entry, year = None):
     when = entry['when']
@@ -33,8 +36,8 @@ def fmt_entry(entry, year = None):
     block.append(header)
     del header
     if entry['comment']: block.append('    ; note: ' + entry['comment'])
-    for (acc, delta) in entry['flow'].items():
-        block.append('    {:<26}  {:>16}'.format(acc, delta))
+    for (acc, flow) in entry['flow'].items():
+        block.append('    {:<26}  {:>16}'.format(acc, flow))
     return "\n".join(block) + "\n"
 
 def fetchiter(cursor):
@@ -159,8 +162,8 @@ def action_ledger(conn, log=logging.getLogger()):
                 'comment': comment,
                 'payee': None if payee_id is None else payees[payee_id],
                 'flow': {
-                    src: fmt_currency(amount, cur),
-                    dst: fmt_currency(-amount, cur)
+                    src: Flow(amount, cur),
+                    dst: Flow(-amount, cur)
                 }
             }
             if year != when.year:

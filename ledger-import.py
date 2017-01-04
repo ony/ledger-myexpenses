@@ -3,6 +3,8 @@ from collections import namedtuple
 from contextlib import closing
 import sqlite3
 import datetime
+import logging
+import argparse
 
 def fmt_currency(coins, name):
     sign = coins >= 0
@@ -84,7 +86,18 @@ class Accounts:
 
 ## Entry
 
-conn = sqlite3.connect('BACKUP')
+parser = argparse.ArgumentParser()
+parser.add_argument('-v', '--verbose', action='count', default=0, help="produce more verbose information")
+parser.add_argument('file', type=str, nargs='?', default="BACKUP", help="MyExpenses database")
+args = parser.parse_args()
+level = dict(enumerate([logging.WARNING, logging.INFO, logging.DEBUG])).get(args.verbose)
+if level is None:
+    parser.error("Too much of verbosity {}".format(args.verbose))
+
+logging.basicConfig(level=level)
+log = logging.getLogger()
+
+conn = sqlite3.connect(args.file)
 conn.row_factory = sqlite3.Row
 accounts = Accounts(conn)
 with closing(conn.cursor()) as c:
@@ -99,12 +112,15 @@ with closing(conn.cursor()) as c:
                  WHERE (transfer_peer IS NULL OR _id < transfer_peer)''')
     for row in fetchiter(c):
         d = {k: row[k] for k in row.keys()}
-        print ('; %r' % (d,))
+        if log.getEffectiveLevel() <= logging.DEBUG:
+            print ('; %r' % (d,))
         locals().update(d)
         src = accounts.asset(account_id)
         cur = accounts.asset_currency(account_id)
         if transfer_account is None:
             assert transfer_peer is None
+            if cat_id is None:
+                logging.warning("No expenses category for txn: %r" % (d))
             dst = accounts.category(cat_id)
         else:
             dst = accounts.asset(transfer_account)

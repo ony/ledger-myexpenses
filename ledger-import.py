@@ -23,10 +23,13 @@ def fmtCurrency(coins, name):
 def fmtEntry(entry, year = None):
     when = entry['when']
     block = []
-    if year == when.year:
-        block.append(when.strftime('%m/%d *  ; time: %H:%M'))
-    else:
-        block.append(when.strftime('%Y/%m/%d *  ; time: %H:%M'))
+    date = when.strftime('%m/%d' if year == when.year else '%Y/%m/%d')
+    header = date + ' *'
+    if entry['payee']: header += ' ' + entry['payee']
+    header += '  ; time: ' + when.strftime('%H:%M')
+    block.append(header)
+    del header
+    if entry['comment']: block.append('    ; note: ' + comment)
     for (acc, delta) in entry['flow'].items():
         block.append('    {:<26}  {:>16}'.format(acc, delta))
     return "\n".join(block) + "\n"
@@ -83,7 +86,11 @@ class Accounts:
             return 'UAH'
 
 conn = sqlite3.connect('BACKUP')
+conn.row_factory = sqlite3.Row
 accounts = Accounts(conn)
+with closing(conn.cursor()) as c:
+    c.execute('SELECT _id, name FROM payee')
+    payees = {r['_id']: r['name'] for r in fetchiter(c)}
 
 year = None
 
@@ -92,23 +99,22 @@ with closing(conn.cursor()) as c:
                  FROM transactions
                  WHERE (transfer_peer IS NULL OR _id < transfer_peer)''')
     for row in fetchiter(c):
-        #print (';' + repr(row))
-        (_id, date, amount, cat_id, asset_id, transfer_peer, transfer_acc, payee_id, desc) = row
+        #print (';' + repr({k: row[k] for k in row.keys()}))
+        (_id, date, amount, cat_id, asset_id, transfer_peer, transfer_acc, payee_id, comment) = row
+        src = accounts.asset(asset_id)
+        cur = accounts.asset_currency(asset_id)
         if transfer_acc is None:
             assert transfer_peer is None
-            dst = accounts.category(cat_id)
-            src = accounts.asset(asset_id)
-            cur = accounts.asset_currency(asset_id)
+            dst = 'Expenses:' + accounts.category(cat_id)
         else:
-            #dst = accounts.asset(transfer_peer)
             dst = accounts.asset(transfer_acc)
-            src = accounts.asset(asset_id)
-            cur = accounts.asset_currency(asset_id)
         #print([src, fmtCurrency(amount, cur), dst])
         if dst == '__SPLIT_TRANSACTION__': continue
         when = datetime.datetime.fromtimestamp(date)
         entry = {
             'when': when,
+            'comment': comment,
+            'payee': None if payee_id is None else payees[payee_id],
             'flow': {
                 src: fmtCurrency(amount, cur),
                 dst: fmtCurrency(-amount, cur)

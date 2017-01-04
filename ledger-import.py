@@ -26,19 +26,25 @@ class Flow(namedtuple('Flow', ['amount', 'currency'])):
         if not sign: money[:0] = ['-']
         return ''.join(money)
 
-def fmt_entry(entry, year = None):
-    when = entry['when']
-    block = []
-    date = when.strftime('%m/%d' if year == when.year else '%Y/%m/%d')
-    header = date + ' *'
-    if entry['payee']: header += ' ' + entry['payee']
-    header += '  ; time: ' + when.strftime('%H:%M')
-    block.append(header)
-    del header
-    if entry['comment']: block.append('    ; note: ' + entry['comment'])
-    for (acc, flow) in entry['flow'].items():
-        block.append('    {:<26}  {:>16}'.format(acc, flow))
-    return "\n".join(block) + "\n"
+class Entry:
+    __slots__ = ('when', 'payee', 'comment', 'flow')
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+    def render(entry, year=None):
+        when = entry.when
+        block = []
+        date = when.strftime('%m/%d' if year == when.year else '%Y/%m/%d')
+        header = date + ' *'
+        if entry.payee: header += ' ' + entry.payee
+        header += '  ; time: ' + when.strftime('%H:%M')
+        block.append(header)
+        del header
+        if entry.comment: block.append('    ; note: ' + entry.comment)
+        for (acc, flow) in entry.flow.items():
+            block.append('    {:<26}  {:>16}'.format(acc, flow))
+        return "\n".join(block) + "\n"
 
 def fetchiter(cursor):
     while True:
@@ -157,19 +163,19 @@ def action_ledger(conn, log=logging.getLogger()):
             else:
                 parent = None  # forget split parent with first non-split transaction
 
-            entry = {
-                'when': when,
-                'comment': comment,
-                'payee': None if payee_id is None else payees[payee_id],
-                'flow': {
+            entry = Entry(
+                when=when,
+                comment=comment,
+                payee=None if payee_id is None else payees[payee_id],
+                flow={
                     src: Flow(amount, cur),
                     dst: Flow(-amount, cur)
-                }
-            }
+                })
+
             if year != when.year:
                 print(when.strftime('\nY%Y\n'))
                 year = when.year
-            print(fmt_entry(entry, year=year))
+            print(entry.render(year=year))
 
 ## Entry
 

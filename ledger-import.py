@@ -112,9 +112,8 @@ class Accounts:
             if _id == 0: continue
             yield self.category(_id)
 
-def action_ledger(conn, log=logging.getLogger()):
+def fetch_entries(conn, log=logging.getLogger()):
     global accounts, payees
-    year = None
     parent = None  # last split parent. always preceed postings
 
     with closing(conn.cursor()) as c:
@@ -163,7 +162,7 @@ def action_ledger(conn, log=logging.getLogger()):
             else:
                 parent = None  # forget split parent with first non-split transaction
 
-            entry = Entry(
+            yield Entry(
                 when=when,
                 comment=comment,
                 payee=None if payee_id is None else payees[payee_id],
@@ -172,10 +171,14 @@ def action_ledger(conn, log=logging.getLogger()):
                     dst: Flow(-amount, cur)
                 })
 
-            if year != when.year:
-                print(when.strftime('\nY%Y\n'))
-                year = when.year
-            print(entry.render(year=year))
+def action_ledger(conn, log=logging.getLogger()):
+    year = None
+    for entry in fetch_entries(conn, log=log):
+        when = entry.when
+        if year != when.year:
+            print(when.strftime('\nY%Y\n'))
+            year = when.year
+        print(entry.render(year=year))
 
 ## Entry
 

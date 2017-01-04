@@ -111,6 +111,7 @@ verbosity_group.add_argument('-v', '--verbose', action='count', default=0, help=
 verbosity_group.add_argument('-q', '--quiet', action='store_true', default=False, help="inhibit any warnings")
 action_group = parser.add_argument_group('alternative actions').add_mutually_exclusive_group()
 action_group.add_argument('--accounts', action='store_true', help='list all accounts')
+action_group.add_argument('--active-accounts', action='store_true', help='list all non-empty accounts')
 parser.add_argument('file', type=str, nargs='?', default="BACKUP", help="MyExpenses database")
 args = parser.parse_args()
 level = dict(enumerate([logging.WARNING, logging.INFO, logging.DEBUG])).get(args.verbose)
@@ -131,6 +132,14 @@ with closing(conn.cursor()) as c:
 
 if args.accounts:
     print("\n".join(accounts.labels()))
+    parser.exit()
+elif args.active_accounts:
+    labels = []
+    labels.extend(sorted([accounts.asset(_id)
+                          for (_id,) in conn.execute('SELECT DISTINCT account_id FROM transactions')]))
+    labels.extend(sorted([accounts.category(_id)
+                          for (_id,) in conn.execute('SELECT DISTINCT cat_id FROM transactions WHERE cat_id IS NOT NULL AND cat_id != 0')]))
+    print("\n".join(labels))
     parser.exit()
 
 year = None

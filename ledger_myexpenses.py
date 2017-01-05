@@ -9,6 +9,10 @@ import datetime
 import logging
 import argparse
 
+__author__ = "Mykola Orliuk"
+__copyright__ = "Copyright 2016 " + __author__
+__license__ = "GPL-3"
+
 class Flow(namedtuple('Flow', ['amount', 'currency', 'payee', 'comment'])):
     def __format__(self, format_spec): return format(str(self), format_spec)
     def __str__(self):
@@ -237,48 +241,49 @@ def action_ledger(conn, log=logging.getLogger()):
 
 ## Entry
 
-parser = argparse.ArgumentParser()
-verbosity_group = parser.add_mutually_exclusive_group()
-verbosity_group.add_argument('-v', '--verbose', action='count', default=0, help="produce more verbose information")
-verbosity_group.add_argument('-q', '--quiet', action='store_true', default=False, help="inhibit any warnings")
-action_group = parser.add_argument_group('alternative actions').add_mutually_exclusive_group()
-action_group.add_argument('--accounts', action='store_true', help='list all accounts')
-action_group.add_argument('--active-accounts', action='store_true', help='list all non-empty accounts')
-action_group.add_argument('--payees', action='store_true', help='list all payees')
-parser.add_argument('file', type=str, nargs='?', default="BACKUP", help="MyExpenses database")
-args = parser.parse_args()
-level = dict(enumerate([logging.WARNING, logging.INFO, logging.DEBUG])).get(args.verbose)
-if level is None:
-    parser.error("Too much of verbosity {}".format(args.verbose))
-if args.quiet:
-    level = logging.ERROR
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    verbosity_group = parser.add_mutually_exclusive_group()
+    verbosity_group.add_argument('-v', '--verbose', action='count', default=0, help="produce more verbose information")
+    verbosity_group.add_argument('-q', '--quiet', action='store_true', default=False, help="inhibit any warnings")
+    action_group = parser.add_argument_group('alternative actions').add_mutually_exclusive_group()
+    action_group.add_argument('--accounts', action='store_true', help='list all accounts')
+    action_group.add_argument('--active-accounts', action='store_true', help='list all non-empty accounts')
+    action_group.add_argument('--payees', action='store_true', help='list all payees')
+    parser.add_argument('file', type=str, nargs='?', default="BACKUP", help="MyExpenses database")
+    args = parser.parse_args()
+    level = dict(enumerate([logging.WARNING, logging.INFO, logging.DEBUG])).get(args.verbose)
+    if level is None:
+        parser.error("Too much of verbosity {}".format(args.verbose))
+    if args.quiet:
+        level = logging.ERROR
 
-logging.basicConfig(level=level)
-log = logging.getLogger()
+    logging.basicConfig(level=level)
+    log = logging.getLogger()
 
-conn = sqlite3.connect(args.file)
-conn.row_factory = sqlite3.Row
-accounts = Accounts(conn)
-with closing(conn.cursor()) as c:
-    c.execute('SELECT _id, name FROM payee')
-    payees = {r['_id']: r['name'] for r in fetchiter(c)}
+    conn = sqlite3.connect(args.file)
+    conn.row_factory = sqlite3.Row
+    accounts = Accounts(conn)
+    with closing(conn.cursor()) as c:
+        c.execute('SELECT _id, name FROM payee')
+        payees = {r['_id']: r['name'] for r in fetchiter(c)}
 
-if args.accounts:
-    print("\n".join(accounts.labels()))
-    parser.exit()
-elif args.active_accounts:
-    labels = []
-    labels.extend(sorted([accounts.asset(_id)
-                          for (_id,) in conn.execute('SELECT DISTINCT account_id FROM transactions')]))
-    labels.extend(sorted([accounts.category(_id)
-                          for (_id,) in conn.execute('SELECT DISTINCT cat_id FROM transactions WHERE cat_id IS NOT NULL AND cat_id != 0')]))
-    print("\n".join(labels))
-    parser.exit()
-elif args.payees:
-    print("\n".join(payees.values()))
-    parser.exit()
+    if args.accounts:
+        print("\n".join(accounts.labels()))
+        parser.exit()
+    elif args.active_accounts:
+        labels = []
+        labels.extend(sorted([accounts.asset(_id)
+                              for (_id,) in conn.execute('SELECT DISTINCT account_id FROM transactions')]))
+        labels.extend(sorted([accounts.category(_id)
+                              for (_id,) in conn.execute('SELECT DISTINCT cat_id FROM transactions WHERE cat_id IS NOT NULL AND cat_id != 0')]))
+        print("\n".join(labels))
+        parser.exit()
+    elif args.payees:
+        print("\n".join(payees.values()))
+        parser.exit()
 
-action_ledger(conn, log=log)
+    action_ledger(conn, log=log)
 
 # TODO: verify functionality of merge postings for split transaction
 # TODO: mapping?

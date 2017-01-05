@@ -163,8 +163,7 @@ def fetch_entries(conn, log=logging.getLogger()):
                 elif cat_id is 0:
                     parent = row  # remember for upcoming postings
                     continue  # skip parent split transaction
-                else:
-                    dst = accounts.category(cat_id)
+                dst = accounts.category(cat_id)
             else:
                 assert row['cat_id'] is 0 or row['cat_id'] is None
                 dst = accounts.asset(transfer_account)

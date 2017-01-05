@@ -1,12 +1,15 @@
 #!/usr/bin/python3
+from itertools import groupby
+from functools import reduce
 from collections import namedtuple
 from contextlib import closing
+import operator
 import sqlite3
 import datetime
 import logging
 import argparse
 
-class Flow(namedtuple('Flow', ['amount', 'currency'])):
+class Flow(namedtuple('Flow', ['amount', 'currency', 'payee', 'comment'])):
     def __format__(self, format_spec): return format(str(self), format_spec)
     def __str__(self):
         coins = self.amount
@@ -26,11 +29,20 @@ class Flow(namedtuple('Flow', ['amount', 'currency'])):
         if not sign: money[:0] = ['-']
         return ''.join(money)
 
+    def __add__(self, other):
+        assert self.comment == other.comment
+        assert self.payee == other.payee
+        assert self.currency == other.currency  # No support for multi-commodities right now
+        return Flow(self.amount + other.amount, self.currency, None, None)
+
 class Entry:
     __slots__ = ('when', 'payee', 'comment', 'flow')
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
+
+    def __repr__(self):
+        return "Entry(**%r)" % ({k: getattr(self, k) for k in self.__slots__},)
 
     def render(entry, year=None):
         when = entry.when
@@ -42,8 +54,12 @@ class Entry:
         block.append(header)
         del header
         if entry.comment: block.append('    ; note: ' + entry.comment)
-        for (acc, flow) in entry.flow.items():
-            block.append('    {:<26}  {:>16}'.format(acc, flow))
+        for (acc, flows) in entry.flow.items():
+            for flow in flows:
+                block.append('    {:<26}  {:>16}'.format(acc, flow))
+                if flow.payee: block.append('    ; payee: ' + flow.payee)
+                if flow.comment: block.append('    ; note: ' + flow.comment)
+
         return "\n".join(block) + "\n"
 
 def fetchiter(cursor):
@@ -162,18 +178,57 @@ def fetch_entries(conn, log=logging.getLogger()):
             else:
                 parent = None  # forget split parent with first non-split transaction
 
+            payee=None if payee_id is None else payees[payee_id]
             yield Entry(
                 when=when,
                 comment=comment,
-                payee=None if payee_id is None else payees[payee_id],
+                payee=payee,
                 flow={
-                    src: Flow(amount, cur),
-                    dst: Flow(-amount, cur)
+                    src: [Flow(amount, cur, None, None)],
+                    dst: [Flow(-amount, cur, payee, comment)]
                 })
+
+def merge_splits(entries, log=logging.getLogger()):
+    cur = None
+    split = False
+    def prepare():
+        # TODO: get rid note duplicates in transaction and posting
+        if not split: return cur
+        payees = set(flow.payee for flows in cur.flow.values() for flow in flows if flow.payee)
+        if cur.payee: payees.add(cur.payee)
+        if len(payees) > 1:  # multi-payee
+            cur.payee = None
+
+        comments = set(flow.comment for flows in cur.flow.values() for flow in flows if flow.comment)
+        if cur.comment: comments.add(cur.comment)
+        if len(comments) > 1:  # multi-comment
+            cur.comment = None
+
+        keyfunc = lambda flow: (flow.amount > 0, str(flow.currency), str(flow.payee), str(flow.comment))
+
+        for acc, flows in cur.flow.items():
+            flows[:] = [reduce(operator.add, g) for _, g in groupby(sorted(flows, key=keyfunc), keyfunc)]
+        return cur
+
+    for entry in entries:
+        if cur is None:  # remember first
+            cur = entry
+            continue
+        if entry.when != cur.when:
+            yield prepare()
+            cur = entry
+            split = False
+            continue
+        split = True
+        for acc, flow in entry.flow.items():
+            sflow = cur.flow.get(acc)
+            if sflow is None: cur.flow[acc] = flow
+            else: cur.flow[acc] = sflow + flow
+    if cur is not None: yield prepare()
 
 def action_ledger(conn, log=logging.getLogger()):
     year = None
-    for entry in fetch_entries(conn, log=log):
+    for entry in merge_splits(fetch_entries(conn, log=log)):
         when = entry.when
         if year != when.year:
             print(when.strftime('\nY%Y\n'))
@@ -225,5 +280,5 @@ elif args.payees:
 
 action_ledger(conn, log=log)
 
-# TODO: merge postings of split transaction
+# TODO: verify functionality of merge postings for split transaction
 # TODO: mapping?

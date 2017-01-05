@@ -53,9 +53,14 @@ class Entry:
         block = []
         date = when.strftime('%m/%d' if year == when.year else '%Y/%m/%d')
         header = date + ' *'
-        if entry.payee: header += ' ' + entry.payee
-        header += '  ; time: ' + when.strftime('%H:%M')
-        block.append(header)
+        if entry.payee:
+            header += ' ' + entry.payee
+            header += '  ; time: ' + when.strftime('%H:%M')
+            block.append(header)
+        else:
+            block.append(header)
+            block.append('    ; time: ' + when.strftime('%H:%M'))
+
         del header
         if entry.comment: block.append('    ; note: ' + entry.comment)
         for (acc, flows) in entry.flow.items():

@@ -3,9 +3,11 @@ from itertools import groupby
 from functools import reduce
 from collections import namedtuple
 from contextlib import closing
+from hashlib import sha1
 import operator
 import sqlite3
 import datetime
+import re
 import logging
 import argparse
 
@@ -40,10 +42,11 @@ class Flow(namedtuple('Flow', ['amount', 'currency', 'payee', 'comment'])):
         return Flow(self.amount + other.amount, self.currency, None, None)
 
 class Entry:
-    __slots__ = ('when', 'payee', 'comment', 'flow')
+    __slots__ = ('when', 'payee', 'comment', 'flow', 'refs')
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
+        if 'refs' not in kwargs: self.refs = set()
 
     def __repr__(self):
         return "Entry(**%r)" % ({k: getattr(self, k) for k in self.__slots__},)
@@ -63,7 +66,8 @@ class Entry:
 
         del header
         if entry.comment: block.append('    ; note: ' + entry.comment)
-        for (acc, flows) in entry.flow.items():
+        for ref in sorted(entry.refs): block.append('    ; ref:' + str(ref))
+        for (acc, flows) in sorted(entry.flow.items(), key=lambda x: x[0]):
             for flow in flows:
                 block.append('    {:<26}  {:>16}'.format(acc, flow))
                 if flow.payee: block.append('    ; payee: ' + flow.payee)
@@ -137,8 +141,11 @@ class Accounts:
             if _id == 0: continue
             yield self.category(_id)
 
+def ref_txn_id(_id):
+    return sha1(b'txn:' + str(_id).encode('ascii')).hexdigest()
+
 def fetch_entries(conn, log=logging.getLogger()):
-    global accounts, payees
+    global accounts, payees, excludes
     parent = None  # last split parent. always preceed postings
 
     with closing(conn.cursor()) as c:
@@ -148,8 +155,10 @@ def fetch_entries(conn, log=logging.getLogger()):
                      ORDER BY date, parent_id IS NOT NULL''')
         for row in fetchiter(c):
             d = {k: row[k] for k in row.keys()}
+            ref = ref_txn_id(row['_id'])
             if log.getEffectiveLevel() <= logging.DEBUG:
-                print ('; %r' % (d,))
+                print ('; %r (ref:%s)' % (d, ref))
+            if ref in excludes: continue # skip excluded transaction
             account_id = row['account_id']
             src = accounts.asset(account_id)
             cur = accounts.asset_currency(account_id)
@@ -186,11 +195,14 @@ def fetch_entries(conn, log=logging.getLogger()):
             else:
                 parent = None  # forget split parent with first non-split transaction
 
-            payee=None if payee_id is None else payees[payee_id]
+            payee = None if payee_id is None else payees[payee_id]
+
             yield Entry(
                 when=when,
                 comment=comment,
                 payee=payee,
+                refs={ref_txn_id(x) for x in (row['_id'], parent_id)
+                                    if x is not None},
                 flow={
                     src: [Flow(amount, cur, None, None)],
                     dst: [Flow(-amount, cur, payee, comment)]
@@ -228,6 +240,7 @@ def merge_splits(entries, log=logging.getLogger()):
             split = False
             continue
         split = True
+        cur.refs.update(entry.refs)
         for acc, flow in entry.flow.items():
             sflow = cur.flow.get(acc)
             if sflow is None: cur.flow[acc] = flow
@@ -235,13 +248,17 @@ def merge_splits(entries, log=logging.getLogger()):
     if cur is not None: yield prepare()
 
 def action_ledger(conn, log=logging.getLogger()):
+    print('; generated file')
     year = None
-    for entry in merge_splits(fetch_entries(conn, log=log)):
+    entries = fetch_entries(conn, log=log)
+    entries = merge_splits(entries)
+    for entry in entries:
         when = entry.when
         if year != when.year:
             print(when.strftime('\nY%Y\n'))
             year = when.year
         print(entry.render(year=year))
+    print('; ex:ft=ledger')
 
 ## Entry
 
@@ -250,12 +267,15 @@ if __name__ == "__main__":
     verbosity_group = parser.add_mutually_exclusive_group()
     verbosity_group.add_argument('-v', '--verbose', action='count', default=0, help="produce more verbose information")
     verbosity_group.add_argument('-q', '--quiet', action='store_true', default=False, help="inhibit any warnings")
+    parser.add_argument('-x', '--excludes', type=argparse.FileType(), action='append', default=[],
+                        help="text file with refs:... entries to exclude transactions")
     action_group = parser.add_argument_group('alternative actions').add_mutually_exclusive_group()
     action_group.add_argument('--accounts', action='store_true', help='list all accounts')
     action_group.add_argument('--active-accounts', action='store_true', help='list all non-empty accounts')
     action_group.add_argument('--payees', action='store_true', help='list all payees')
     parser.add_argument('file', type=str, nargs='?', default="BACKUP", help="MyExpenses database")
     args = parser.parse_args()
+
     level = dict(enumerate([logging.WARNING, logging.INFO, logging.DEBUG])).get(args.verbose)
     if level is None:
         parser.error("Too much of verbosity {}".format(args.verbose))
@@ -267,10 +287,15 @@ if __name__ == "__main__":
 
     conn = sqlite3.connect(args.file)
     conn.row_factory = sqlite3.Row
+
     accounts = Accounts(conn)
-    with closing(conn.cursor()) as c:
-        c.execute('SELECT _id, name FROM payee')
-        payees = {r['_id']: r['name'] for r in fetchiter(c)}
+
+    payees = {r['_id']: r['name']
+              for r in conn.execute('SELECT _id, name FROM payee')}
+
+    excludes = {ref
+                for f in args.excludes
+                for ref in re.findall(r'\bref:([\da-f]{40})\b', f.read())}
 
     if args.accounts:
         print("\n".join(accounts.labels()))
@@ -288,6 +313,3 @@ if __name__ == "__main__":
         parser.exit()
 
     action_ledger(conn, log=log)
-
-# TODO: verify functionality of merge postings for split transaction
-# TODO: mapping?

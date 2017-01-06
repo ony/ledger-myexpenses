@@ -212,18 +212,29 @@ def merge_splits(entries, log=logging.getLogger()):
     cur = None
     split = False
     def prepare():
-        # TODO: get rid note duplicates in transaction and posting
+        if cur.payee:
+            payees = set(flow.payee for flows in cur.flow.values() for flow in flows if flow.payee)
+            payees.add(cur.payee)
+            if len(payees) > 1:  # multi-payee
+                cur.payee = None
+            else:  # shared payee
+                # drop per-posting payees
+                for flows in cur.flow.values():
+                    flows[:] = [Flow(flow.amount, flow.currency, None, flow.comment) for flow in flows]
+
+        if cur.comment:
+            comments = set(flow.comment for flows in cur.flow.values() for flow in flows if flow.comment)
+            comments.add(cur.comment)
+            if len(comments) > 1:  # multi-comment
+                cur.comment = None
+            else:  # shared comment
+                # drop per-posting comment
+                for flows in cur.flow.values():
+                    flows[:] = [Flow(flow.amount, flow.currency, flow.payee, None) for flow in flows]
+
         if not split: return cur
-        payees = set(flow.payee for flows in cur.flow.values() for flow in flows if flow.payee)
-        if cur.payee: payees.add(cur.payee)
-        if len(payees) > 1:  # multi-payee
-            cur.payee = None
 
-        comments = set(flow.comment for flows in cur.flow.values() for flow in flows if flow.comment)
-        if cur.comment: comments.add(cur.comment)
-        if len(comments) > 1:  # multi-comment
-            cur.comment = None
-
+        # for splits group cashflow by accounts, direction, currency, payee and comment
         keyfunc = lambda flow: (flow.amount > 0, str(flow.currency), str(flow.payee), str(flow.comment))
 
         for acc, flows in cur.flow.items():

@@ -28,4 +28,8 @@ Suggested workflow
 Pass `--excludes` option to this tool with a path to file with full ledger
 journal to avoid re-generating old transactions.
 If your journal is scattered over multiple files you can use output of
-`ledger print`. Under `zsh` you can use `./ledger_myexpenses.py -x <(ledger print)`.
+`ledger print`.
+
+Under `bash` you can use `ledger print | ./ledger_myexpenses.py -x -`.
+
+Under `zsh` you can use `./ledger_myexpenses.py -x <(ledger print)`.

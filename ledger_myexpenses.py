@@ -2,8 +2,11 @@
 from itertools import groupby
 from functools import reduce
 from collections import namedtuple
-from contextlib import closing
+from contextlib import closing, contextmanager
 from hashlib import sha1
+from tempfile import NamedTemporaryFile
+from zipfile import ZipFile, is_zipfile
+from shutil import copyfileobj
 import operator
 import sqlite3
 import datetime
@@ -271,6 +274,18 @@ def action_ledger(conn, log=logging.getLogger()):
         print(entry.render(year=year))
     print('; ex:ft=ledger')
 
+@contextmanager
+def _backup_filename(filename):
+    if is_zipfile(filename):
+        with NamedTemporaryFile(prefix='.MyExpenses-') as f:
+            with ZipFile(filename) as z:
+                with z.open("BACKUP") as b:
+                    copyfileobj(b, f)
+            f.flush()
+            yield f.name
+    else:
+        yield filename
+
 ## Entry
 
 if __name__ == "__main__":
@@ -296,7 +311,9 @@ if __name__ == "__main__":
     logging.basicConfig(level=level)
     log = logging.getLogger()
 
-    conn = sqlite3.connect(args.file)
+    with _backup_filename(args.file) as filename:
+        conn = sqlite3.connect(filename)
+
     conn.row_factory = sqlite3.Row
 
     accounts = Accounts(conn)
